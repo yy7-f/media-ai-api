@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Tools – Jobs</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 900px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .progress { width: 240px; height: 12px; background: #eee; border-radius: 6px; overflow: hidden; }
+    .progress > div { height: 100%; background: #4f46e5; width: 0%; transition: width .3s; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Video Inpaint (LaMa) – Jobs</h1>
+
+  <div class="card">
+    <h3>Start Job</h3>
+    <div class="row">
+      <input id="video" type="file" accept="video/*" />
+      <label>OCR langs: <input id="langs" value="en" /></label>
+      <label>Pad(px): <input id="pad" type="number" value="8" style="width:60px" /></label>
+      <label>Smooth: <input id="smooth" type="number" value="1" style="width:60px" /></label>
+      <label>Static≥: <input id="static" type="number" value="0.25" step="0.05" style="width:80px" /></label>
+      <button id="start">Start</button>
+    </div>
+    <p id="startMsg"></p>
+  </div>
+
+  <div class="card">
+    <h3>Job Status</h3>
+    <div class="row">
+      <input id="jobid" placeholder="job id" style="width:280px" />
+      <button id="poll">Poll</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="progress"><div id="bar"></div></div>
+      <span id="pct">0%</span>
+    </div>
+    <pre id="json" style="white-space:pre-wrap; background:#fafafa; padding:12px; border-radius:8px;"></pre>
+    <p id="link"></p>
+  </div>
+
+  <script>
+    const BASE = "/api/v1"; // adjust if needed
+
+    document.getElementById('start').onclick = async () => {
+      const f = document.getElementById('video').files[0];
+      if (!f) return alert("Choose a video file first.");
+      const fd = new FormData();
+      fd.append('video', f);
+      fd.append('ocr_langs', document.getElementById('langs').value);
+      fd.append('bbox_pad', document.getElementById('pad').value);
+      fd.append('smooth', document.getElementById('smooth').value);
+      fd.append('static_thresh', document.getElementById('static').value);
+      const r = await fetch(`${BASE}/jobs/inpaint/video`, { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) return alert(j.message || 'start failed');
+      document.getElementById('startMsg').textContent = `Job started: ${j.job_id}`;
+      document.getElementById('jobid').value = j.job_id;
+      poll();
+    };
+
+    document.getElementById('poll').onclick = () => poll();
+
+    async function poll(){
+      const id = document.getElementById('jobid').value.trim();
+      if (!id) return;
+      const r = await fetch(`${BASE}/jobs/${id}`);
+      const j = await r.json();
+      if (!r.ok) { alert(j.message || 'not found'); return; }
+      document.getElementById('json').textContent = JSON.stringify(j, null, 2);
+      const p = Math.max(0, Math.min(100, j.progress || 0));
+      document.getElementById('bar').style.width = p + '%';
+      document.getElementById('pct').textContent = p + '%';
+      if (j.status === 'DONE' && j.result_path) {
+        document.getElementById('link').innerHTML = `Result: <code>${j.result_path}</code>`;
+      } else if (j.status === 'ERROR') {
+        document.getElementById('link').textContent = 'Job error.';
+      } else if (j.status === 'CANCELED') {
+        document.getElementById('link').textContent = 'Job canceled.';
+      } else {
+        setTimeout(poll, 2500);
+      }
+    }
+  </script>
+</body>
+</html>
