@@ -2,6 +2,8 @@ from flask import current_app, request, jsonify
 from flask_restx import Resource, Namespace
 from werkzeug.datastructures import FileStorage
 from application.v1.services.overlay_text_service import OverlayTextService
+import os
+from application.workers import api_key_required
 
 ns_overlay = Namespace(
     "Overlay",
@@ -26,7 +28,10 @@ parser.add_argument("fontfile",   location="form", required=False, help="Absolut
 @ns_overlay.route("/text")
 class OverlayTextResource(Resource):
     @ns_overlay.expect(parser)
-    @ns_overlay.doc(description="Upload a video + text and get an MP4 with burned overlay text.")
+    @ns_overlay.doc(description="Upload a video + text and get an MP4 with burned overlay text.",
+                    security="apikey",  # Swagger uses your API-KEY scheme
+                    )
+    @api_key_required  # ✅ enforce header
     def post(self):
         args = parser.parse_args()
         f = args.get("video")
@@ -58,22 +63,27 @@ class OverlayTextResource(Resource):
         fontfile   = request.values.get("fontfile")  # optional
 
         try:
-            upload_dir  = current_app.config.get("UPLOAD_FOLDER", "uploads")
-            output_root = current_app.config.get("OVERLAY_OUTPUT", "overlay_output")
+            upload_dir = current_app.config.get("UPLOAD_FOLDER", "/tmp/uploads")
+            output_root = current_app.config.get("OVERLAY_OUTPUT", "/tmp/overlay_output")
+            bucket_name = current_app.config.get("OUTPUT_BUCKET", "media-ai-api-output")
+            bucket_name = "media-ai-api-output"
 
             vpath = OverlayTextService.save_upload(f, upload_dir)
             svc = OverlayTextService(vpath, work_root=upload_dir, output_root=output_root)
+
             res = svc.process(
                 text=text, x=x, y=y, start=start, end=end,
                 fontsize=fontsize, fontcolor=fontcolor,
                 box=box, boxcolor=boxcolor, boxborderw=boxborderw,
-                fontfile=fontfile
+                fontfile=fontfile,
+                bucket_name=bucket_name
             )
             return jsonify({
                 "status": "ok",
-                "result_path": res.output_path,
-                "filename": res.output_path.split("/")[-1],
-                "diagnostics": res.diagnostics
+                "result_path": res.output_path,  # internal /tmp path
+                "filename": os.path.basename(res.output_path),
+                "gcs_url": res.diagnostics.get("gcs_url"),  # 👈 public-ish location
+                "diagnostics": res.diagnostics,
             })
         except Exception as e:
             return {"message": f"Unexpected error: {e}"}, 500

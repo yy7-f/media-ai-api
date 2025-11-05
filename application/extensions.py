@@ -12,7 +12,14 @@ authorizations = {
 api = Api(
 	version='1.0',
 	prefix="/api/v1",
-	authorizations=authorizations
+	authorizations=authorizations,
+    doc="/api/v1/docs",          # Swagger at /api/v1/docs
 )
 
-db = SQLAlchemy()
+
+try:
+    from flask_sqlalchemy import SQLAlchemy
+    db = SQLAlchemy()
+except Exception as e:
+    db = None
+    print(f"[EXT] SQLAlchemy not available: {e}")

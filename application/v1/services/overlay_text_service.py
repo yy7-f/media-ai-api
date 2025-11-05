@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Optional
 from werkzeug.utils import secure_filename
 
+from application.utils.gcs_upload import upload_to_gcs
+
 @dataclass
 class OverlayResult:
     output_path: str
@@ -25,7 +27,12 @@ class OverlayTextService:
         file_storage.save(path)
         return path
 
-    def __init__(self, video_path: str, work_root="uploads", output_root="overlay_output"):
+    def __init__(
+        self,
+        video_path: str,
+        work_root: str = "/tmp/uploads",
+        output_root: str = "/tmp/overlay_output",
+    ):
         if not os.path.isfile(video_path):
             raise FileNotFoundError(video_path)
         self.video_path = video_path
@@ -41,19 +48,22 @@ class OverlayTextService:
         if p.returncode != 0:
             raise RuntimeError(f"FFmpeg failed: {' '.join(cmd)}\n{p.stderr or p.stdout}")
 
-    def process(self,
-                *,
-                text: str,
-                x: str = "(w-text_w)/2",
-                y: str = "h-100",
-                start: Optional[float] = None,
-                end: Optional[float] = None,
-                fontsize: int = 42,
-                fontcolor: str = "white",
-                box: int = 1,
-                boxcolor: str = "black@0.5",
-                boxborderw: int = 10,
-                fontfile: Optional[str] = None):
+    def process(
+            self,
+            *,
+            text: str,
+            x: str = "(w-text_w)/2",
+            y: str = "h-100",
+            start: Optional[float] = None,
+            end: Optional[float] = None,
+            fontsize: int = 42,
+            fontcolor: str = "white",
+            box: int = 1,
+            boxcolor: str = "black@0.5",
+            boxborderw: int = 10,
+            fontfile: Optional[str] = None,
+            bucket_name: Optional[str] = None,
+    ) -> OverlayResult:
         """
         Overlay a single text line (with timing).
         - x, y: FFmpeg expressions (strings). Defaults: centered bottom.
@@ -61,9 +71,13 @@ class OverlayTextService:
         - fontfile: optional absolute path to a TTF/OTF file.
         """
 
-        # Escape single quotes and colons for drawtext
+        # Escape single quotes, colons, backslashes for drawtext
         def esc(s: str) -> str:
-            return s.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
+            return (
+                s.replace("\\", "\\\\")
+                .replace(":", r"\:")
+                .replace("'", r"\'")
+            )
 
         expr = []
         expr.append(f"text='{esc(text)}'")
@@ -79,6 +93,7 @@ class OverlayTextService:
         if start is not None and end is not None:
             expr.append(f"enable='between(t,{float(start)},{float(end)})'")
 
+        # This is the variable you were missing
         vf = f"drawtext={':'.join(expr)}"
 
         cmd = [
@@ -87,9 +102,15 @@ class OverlayTextService:
             "-vf", vf,
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "copy",
-            self.output_path
+            self.output_path,
         ]
         self._run(cmd)
+
+        gcs_url = None
+        if bucket_name:
+            dest_name = os.path.basename(self.output_path)
+            gcs_path = f"overlay/{dest_name}"
+            gcs_url = upload_to_gcs(self.output_path, bucket_name, gcs_path)
 
         return OverlayResult(
             output_path=self.output_path,
@@ -98,6 +119,7 @@ class OverlayTextService:
                 "start": start, "end": end,
                 "fontsize": fontsize, "fontcolor": fontcolor,
                 "box": box, "boxcolor": boxcolor, "boxborderw": boxborderw,
-                "fontfile": fontfile
-            }
+                "fontfile": fontfile,
+                "gcs_url": gcs_url,
+            },
         )

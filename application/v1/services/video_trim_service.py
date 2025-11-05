@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 from werkzeug.utils import secure_filename
 
+from application.utils.gcs_upload import upload_to_gcs
+
 
 @dataclass
 class TrimResult:
@@ -74,7 +76,8 @@ class VideoTrimService:
         precise: bool = True,             # True=re-encode (frame-accurate), False=fast copy (keyframe)
         crf: int = 18,
         preset: str = "veryfast",
-        copy_audio: bool = True
+        copy_audio: bool = True,
+        bucket_name: Optional[str] = None,
     ) -> TrimResult:
 
         if start is None and end is None and duration is None:
@@ -127,6 +130,12 @@ class VideoTrimService:
 
         self._run(cmd)
 
+        gcs_url = None
+        if bucket_name:
+            dest_name = os.path.basename(self.output_path)
+            gcs_path = f"trim/{dest_name}"
+            gcs_url = upload_to_gcs(self.output_path, bucket_name, gcs_path)
+
         return TrimResult(
             output_path=self.output_path,
             diagnostics={
@@ -137,6 +146,7 @@ class VideoTrimService:
                 "crf": crf,
                 "preset": preset,
                 "copy_audio": copy_audio,
-                "video_duration_probe": vid_dur
+                "video_duration_probe": vid_dur,
+                "gcs_url": gcs_url
             }
         )

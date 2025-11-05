@@ -1,3 +1,5 @@
+import os
+
 from flask import current_app, request, jsonify
 from flask_restx import Resource, Namespace
 from werkzeug.datastructures import FileStorage
@@ -32,6 +34,7 @@ parser.add_argument("crf",         location="form", required=False, help="x264 C
 parser.add_argument("preset",      location="form", required=False, help="x264 preset (default veryfast)")
 parser.add_argument("copy_audio",  location="form", required=False, help="true|false (default true)")
 
+
 @ns_crop.route("/")
 class VideoCropResource(Resource):
     @ns_crop.expect(parser)
@@ -43,14 +46,21 @@ class VideoCropResource(Resource):
             return {"message": "No video provided"}, 400
 
         def to_int_opt(v):
-            try: return int(v) if v not in (None, "") else None
-            except Exception: return None
+            try:
+                return int(v) if v not in (None, "") else None
+            except Exception:
+                return None
+
         def to_bool(v, d):
-            if v is None: return d
+            if v is None:
+                return d
             return str(v).lower() == "true"
+
         def to_int(v, d):
-            try: return int(v) if v not in (None, "") else d
-            except Exception: return d
+            try:
+                return int(v) if v not in (None, "") else d
+            except Exception:
+                return d
 
         # Manual rect (optional)
         x      = to_int_opt(request.values.get("x"))
@@ -74,8 +84,11 @@ class VideoCropResource(Resource):
             return {"message": "Provide either x,y,width,height OR aspect=9:16"}, 400
 
         try:
-            upload_dir  = current_app.config.get("UPLOAD_FOLDER", "uploads")
-            output_root = current_app.config.get("CROP_OUTPUT", "crop_output")
+            upload_dir  = current_app.config.get("UPLOAD_FOLDER", "/tmp/uploads")
+            output_root = current_app.config.get("CROP_OUTPUT", "/tmp/crop_output")
+            bucket_name = current_app.config.get("OUTPUT_BUCKET", "media-ai-api-output")
+            # if you want to force a fixed bucket like overlay:
+            # bucket_name = "media-ai-api-output"
 
             vpath = VideoCropService.save_upload(f, upload_dir=upload_dir)
             svc = VideoCropService(vpath, work_root=upload_dir, output_root=output_root)
@@ -84,14 +97,16 @@ class VideoCropResource(Resource):
                 aspect=aspect, mode=mode,
                 offset_x=offset_x, offset_y=offset_y,
                 ensure_even=ensure_even, safe_bounds=safe_bounds,
-                crf=crf, preset=preset, copy_audio=copy_a
+                crf=crf, preset=preset, copy_audio=copy_a,
+                bucket_name=bucket_name,
             )
 
             return jsonify({
                 "status": "ok",
                 "result_path": res.output_path,
-                "filename": res.output_path.split('/')[-1],
-                "diagnostics": res.diagnostics
+                "filename": os.path.basename(res.output_path),
+                "gcs_url": res.diagnostics.get("gcs_url"),
+                "diagnostics": res.diagnostics,
             })
         except ValueError as ve:
             return {"message": str(ve)}, 400

@@ -1,6 +1,7 @@
 import os
 from flask import request
 from flask_restx import abort
+from functools import wraps
 
 
 def setup_config():
@@ -46,15 +47,31 @@ def setup_config_secret():
 		raise e
 
 
-# API key authentication decorator
+
 def api_key_required(func):
-	def wrapper(*args, **kwargs):
-		key = request.headers.get('API-Key')
-		if key:
-			from application.v1.models.models_auth import User
-			user = User.query.filter_by(api_key=key).first()
-			if user:
-				return func(*args, **kwargs)
-		abort(401, message="Unauthorized access")
-	return wrapper
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        sent = request.headers.get("API-Key")
+        valid = os.getenv("API_KEY")
+        if sent and valid and sent == valid:
+            return func(*args, **kwargs)
+        abort(401, message="Unauthorized access")
+    return wrapper
+
+
+# API key authentication decorator
+# def api_key_required(func):
+# 	@wraps(func)  # ✅ keep original function name & doc
+# 	def wrapper(*args, **kwargs):
+# 		key = request.headers.get('API_Key')
+# 		if key:
+# 			from application.v1.models.models_auth import User
+# 			user = User.query.filter_by(api_key=key).first()
+# 			if user:
+# 				return func(*args, **kwargs)
+# 		abort(401, message="Unauthorized access")
+# 	return wrapper
+
+
+
 

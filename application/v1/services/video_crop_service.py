@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from werkzeug.utils import secure_filename
 
+from application.utils.gcs_upload import upload_to_gcs
+
 
 @dataclass
 class CropResult:
@@ -18,7 +20,7 @@ class VideoCropService:
         return "." in name and name.rsplit(".", 1)[1].lower() in VideoCropService.ALLOWED
 
     @staticmethod
-    def save_upload(fs, upload_dir="uploads") -> str:
+    def save_upload(fs, upload_dir: str = "/tmp/uploads") -> str:
         os.makedirs(upload_dir, exist_ok=True)
         name = secure_filename(fs.filename or "")
         if not name:
@@ -30,7 +32,7 @@ class VideoCropService:
         fs.save(path)
         return path
 
-    def __init__(self, video_path: str, work_root="uploads", output_root="crop_output"):
+    def __init__(self, video_path: str, work_root: str = "/tmp/uploads", output_root: str = "/tmp/crop_output"):
         if not os.path.isfile(video_path):
             raise FileNotFoundError(video_path)
         self.video_path = video_path
@@ -51,8 +53,10 @@ class VideoCropService:
 
     def _probe_size(self) -> Optional[Dict[str, int]]:
         p = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height", "-of", "json", self.video_path],
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-of", "json", self.video_path
+            ],
             capture_output=True, text=True
         )
         if p.returncode != 0:
@@ -121,13 +125,19 @@ class VideoCropService:
         return x, y
 
     @staticmethod
-    def _ensure_even_rect(x: int, y: int, w: int, h: int, src_w: int, src_h: int) -> Tuple[int,int,int,int]:
-        if w % 2 == 1: w -= 1
-        if h % 2 == 1: h -= 1
-        if w < 2: w = 2
-        if h < 2: h = 2
-        if x % 2 == 1: x -= 1
-        if y % 2 == 1: y -= 1
+    def _ensure_even_rect(x: int, y: int, w: int, h: int, src_w: int, src_h: int) -> Tuple[int, int, int, int]:
+        if w % 2 == 1:
+            w -= 1
+        if h % 2 == 1:
+            h -= 1
+        if w < 2:
+            w = 2
+        if h < 2:
+            h = 2
+        if x % 2 == 1:
+            x -= 1
+        if y % 2 == 1:
+            y -= 1
         x = max(0, min(x, src_w - w))
         y = max(0, min(y, src_h - h))
         return x, y, w, h
@@ -150,7 +160,8 @@ class VideoCropService:
         crf: int = 18,
         preset: str = "veryfast",
         copy_audio: bool = True,
-        safe_bounds: bool = True
+        safe_bounds: bool = True,
+        bucket_name: Optional[str] = None,  # 👈 GCS bucket (optional)
     ) -> CropResult:
 
         src = self._probe_size()
@@ -198,6 +209,12 @@ class VideoCropService:
 
         self._run(cmd)
 
+        gcs_url = None
+        if bucket_name:
+            dest_name = os.path.basename(self.output_path)
+            gcs_path = f"crop/{dest_name}"
+            gcs_url = upload_to_gcs(self.output_path, bucket_name, gcs_path)
+
         return CropResult(
             output_path=self.output_path,
             diagnostics={
@@ -211,6 +228,7 @@ class VideoCropService:
                 "crf": crf,
                 "preset": preset,
                 "copy_audio": copy_audio,
-                "safe_bounds": safe_bounds
-            }
+                "safe_bounds": safe_bounds,
+                "gcs_url": gcs_url,
+            },
         )

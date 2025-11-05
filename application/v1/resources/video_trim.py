@@ -1,6 +1,7 @@
 from flask import current_app, request, jsonify
 from flask_restx import Resource, Namespace
 from werkzeug.datastructures import FileStorage
+import os
 
 from application.v1.services.video_trim_service import VideoTrimService
 
@@ -52,19 +53,23 @@ class VideoTrimResource(Resource):
         try:
             upload_dir  = current_app.config.get("UPLOAD_FOLDER", "uploads")
             output_root = current_app.config.get("TRIM_OUTPUT", "trim_output")
+            bucket_name = current_app.config.get("OUTPUT_BUCKET", "media-ai-api-output")
 
             vpath = VideoTrimService.save_upload(f, upload_dir=upload_dir)
             svc = VideoTrimService(vpath, work_root=upload_dir, output_root=output_root)
+
             res = svc.process(
                 start=start, end=end, duration=duration,
-                precise=precise, crf=crf, preset=preset, copy_audio=copy_a
+                precise=precise, crf=crf, preset=preset, copy_audio=copy_a,
+                bucket_name=bucket_name,
             )
 
             return jsonify({
                 "status": "ok",
                 "result_path": res.output_path,
                 "filename": res.output_path.split("/")[-1],
-                "diagnostics": res.diagnostics
+                "diagnostics": res.diagnostics,
+                "gcs_uri": res.diagnostics.get("gcs_url"),
             })
         except ValueError as ve:
             return {"message": str(ve)}, 400
